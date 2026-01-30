@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from djangoBack.armenify_server.models import UserSettings, UserWordProgress
+from ArmenifyMe.armenify_server.models import UserSettings, UserWordProgress
 
 User = get_user_model()
 

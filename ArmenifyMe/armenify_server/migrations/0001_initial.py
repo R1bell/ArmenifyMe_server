@@ -6,7 +6,7 @@ import django.utils.timezone
 import uuid
 from django.conf import settings
 from django.db import migrations, models
-import djangoBack.armenify_server.models
+import ArmenifyMe.armenify_server.models
 
 
 class Migration(migrations.Migration):
@@ -54,7 +54,7 @@ class Migration(migrations.Migration):
                 'abstract': False,
             },
             managers=[
-                ('objects', djangoBack.armenify_server.models.UserManager()),
+                ('objects', ArmenifyMe.armenify_server.models.UserManager()),
             ],
         ),
         migrations.CreateModel(

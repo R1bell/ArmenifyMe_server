@@ -9,8 +9,8 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from djangoBack.armenify_server.models import UserSettings, UserWordProgress, Word
-from djangoBack.armenify_server.serializers import (
+from ArmenifyMe.armenify_server.models import UserSettings, UserWordProgress, Word
+from ArmenifyMe.armenify_server.serializers import (
     ChatAnswerRequestSerializer,
     ChatAnswerResponseSerializer,
     ChatQuestionSerializer,

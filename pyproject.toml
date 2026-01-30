@@ -1,10 +1,10 @@
 [tool.poetry]
-name = "djangoback"
+name = "ArmenifyMe"
 version = "0.1.0"
 description = "DRF backend for Armenian learning app"
 authors = ["r1bell <sanamyanraph@gmail.com>"]
 readme = "README.md"
-packages = [{ include = "djangoBack" }]
+packages = [{ include = "ArmenifyMe" }]
 
 [tool.poetry.dependencies]
 python = "^3.12"
