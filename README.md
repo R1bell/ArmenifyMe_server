@@ -1,8 +1,74 @@
 # ArmenifyMe_server
 
-`python -m venv venv`
+## Локальный запуск
 
-`pip install -r requirements.txt`
+### Windows (PowerShell)
 
-`.\venv\Scripts\activate`
+1) Создать и активировать venv:
+```powershell
+python -m venv .venv
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+2) Установить зависимости:
+```powershell
+pip install poetry
+poetry install
+```
+
+3) Заполнить `.env` (можно скопировать из `.env.example`).
+
+4) Применить миграции и заполнить слова:
+```powershell
+python manage.py migrate
+python manage.py seed_words
+```
+
+5) Запуск сервера:
+```powershell
+python manage.py runserver
+```
+
+Swagger UI: `http://127.0.0.1:8000/api/docs/`
+
+### Linux / macOS (bash/zsh)
+
+1) Создать и активировать venv:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+2) Установить зависимости:
+```bash
+pip install poetry
+poetry install
+```
+
+3) Заполнить `.env` (можно скопировать из `.env.example`).
+
+4) Применить миграции и заполнить слова:
+```bash
+python manage.py migrate
+python manage.py seed_words
+```
+
+5) Запуск сервера:
+```bash
+python manage.py runserver
+```
+
+Swagger UI: `http://127.0.0.1:8000/api/docs/`
+
+## Запуск через Docker
+
+1) Убедиться, что есть `.env` (можно из `.env.example`).
+
+2) Запуск:
+```powershell
+docker compose up --build
+```
+
+Swagger UI: `http://127.0.0.1:8000/api/docs/`
 
