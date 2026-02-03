@@ -2,6 +2,7 @@
 PROJECT_TODO.md
 HTTP_MODELS.md
 DB_MODELS.md
+.env
 
 # Python / Django
 __pycache__/

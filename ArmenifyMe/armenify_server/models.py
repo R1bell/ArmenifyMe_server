@@ -1,5 +1,6 @@
 import uuid
 
+from django.conf import settings
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.db import models
 
@@ -71,8 +72,8 @@ class UserWordProgress(models.Model):
 
 class UserSettings(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
-    correct_threshold = models.IntegerField(default=10)
-    learning_list_size = models.IntegerField(default=20)
+    correct_threshold = models.IntegerField(default=settings.CORRECT_THRESHOLD)
+    learning_list_size = models.IntegerField(default=settings.LEARNING_LIST_SIZE)
     updated_at = models.DateTimeField(auto_now=True)
 
 

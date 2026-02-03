@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
+from django.conf import settings as django_settings
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -27,6 +28,43 @@ from ArmenifyMe.armenify_server.serializers import (
 
 def _normalize_answer(value: str) -> str:
     return value.strip().lower().replace("ё", "е")
+
+
+def _ensure_learning_size(user):
+    settings, _created = UserSettings.objects.get_or_create(
+        user=user,
+        defaults={
+            "learning_list_size": django_settings.LEARNING_LIST_SIZE,
+            "correct_threshold": django_settings.CORRECT_THRESHOLD,
+        },
+    )
+    target_size = settings.learning_list_size
+    current_count = UserWordProgress.objects.filter(
+        user=user, status=UserWordProgress.Status.LEARNING
+    ).count()
+    if current_count >= target_size:
+        return
+
+    needed = target_size - current_count
+    existing_word_ids = UserWordProgress.objects.filter(user=user).values_list(
+        "word_id", flat=True
+    )
+    word_ids = list(
+        Word.objects.exclude(id__in=existing_word_ids)
+        .order_by("?")
+        .values_list("id", flat=True)[:needed]
+    )
+    if word_ids:
+        UserWordProgress.objects.bulk_create(
+            [
+                UserWordProgress(
+                    user=user,
+                    word_id=word_id,
+                    status=UserWordProgress.Status.LEARNING,
+                )
+                for word_id in word_ids
+            ]
+        )
 
 
 class ChatQuestionView(APIView):
@@ -81,9 +119,13 @@ class ChatAnswerView(APIView):
         normalized_translations = [_normalize_answer(t) for t in translations]
         correct = normalized in normalized_translations
 
-        threshold = UserSettings.objects.filter(user=request.user).values_list(
-            "correct_threshold", flat=True
-        ).first() or 10
+        threshold = (
+            UserSettings.objects.filter(user=request.user)
+            .values_list("correct_threshold", flat=True)
+            .first()
+        )
+        if threshold is None:
+            threshold = django_settings.CORRECT_THRESHOLD
 
         if correct:
             progress.correct_count = F("correct_count") + 1
@@ -92,6 +134,7 @@ class ChatAnswerView(APIView):
             if progress.correct_count >= threshold:
                 progress.status = UserWordProgress.Status.LEARNED
                 progress.save(update_fields=["status"])
+                _ensure_learning_size(request.user)
 
         payload = {
             "correct": correct,
@@ -114,20 +157,7 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        word_ids = list(
-            Word.objects.order_by("?").values_list("id", flat=True)[:20]
-        )
-        if word_ids:
-            UserWordProgress.objects.bulk_create(
-                [
-                    UserWordProgress(
-                        user=user,
-                        word_id=word_id,
-                        status=UserWordProgress.Status.LEARNING,
-                    )
-                    for word_id in word_ids
-                ]
-            )
+        _ensure_learning_size(user)
         return Response({"id": user.id, "email": user.email}, status=status.HTTP_201_CREATED)
 
 
@@ -199,6 +229,7 @@ class LearningDeleteView(APIView):
 
         progress.status = UserWordProgress.Status.DELETED
         progress.save(update_fields=["status"])
+        _ensure_learning_size(request.user)
         return Response({"status": "deleted"})
 
 
@@ -216,6 +247,7 @@ class LearningMoveView(APIView):
 
         progress.status = UserWordProgress.Status.LEARNED
         progress.save(update_fields=["status"])
+        _ensure_learning_size(request.user)
         return Response({"status": "learned"})
 
 
@@ -265,6 +297,7 @@ class LearnedDeleteView(APIView):
 
         progress.status = UserWordProgress.Status.DELETED
         progress.save(update_fields=["status"])
+        _ensure_learning_size(request.user)
         return Response({"status": "deleted"})
 
 
@@ -275,7 +308,13 @@ class SettingsView(APIView):
         responses=UserSettingsSerializer,
     )
     def get(self, request):
-        settings, _created = UserSettings.objects.get_or_create(user=request.user)
+        settings, _created = UserSettings.objects.get_or_create(
+            user=request.user,
+            defaults={
+                "learning_list_size": django_settings.LEARNING_LIST_SIZE,
+                "correct_threshold": django_settings.CORRECT_THRESHOLD,
+            },
+        )
         return Response(UserSettingsSerializer(settings).data)
 
     @transaction.atomic
