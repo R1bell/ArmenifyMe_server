@@ -15,6 +15,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
 
   app:
     build: .
@@ -22,6 +27,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
     environment:
       DB_HOST: db
       DB_PORT: "5432"
@@ -30,12 +37,35 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-admin}
       LEARNING_LIST_SIZE: ${LEARNING_LIST_SIZE:-20}
       CORRECT_THRESHOLD: ${CORRECT_THRESHOLD:-10}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
     ports:
       - "8000:8000"
     command: >
       sh -c "python manage.py migrate &&
              python manage.py seed_words &&
              python manage.py runserver 0.0.0.0:8000"
+
+  worker:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-postgres}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-admin}
+      LEARNING_LIST_SIZE: ${LEARNING_LIST_SIZE:-20}
+      CORRECT_THRESHOLD: ${CORRECT_THRESHOLD:-10}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
+      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+    command: >
+      sh -c "celery -A ArmenifyMe worker -l info"
 
 volumes:
   postgres_data:

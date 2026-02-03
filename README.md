@@ -72,3 +72,17 @@ docker compose up --build
 
 Swagger UI: `http://127.0.0.1:8000/api/docs/`
 
+## Celery
+
+### Локально
+
+Убедись, что запущен Redis, затем:
+
+```powershell
+celery -A ArmenifyMe worker -l info
+```
+
+### Через Docker
+
+Celery worker запускается отдельным сервисом `worker` в `docker-compose.yml`.
+

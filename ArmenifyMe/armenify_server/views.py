@@ -24,6 +24,7 @@ from ArmenifyMe.armenify_server.serializers import (
     UserSettingsSerializer,
     WordProgressSerializer,
 )
+from ArmenifyMe.armenify_server.tasks import add_initial_words, ensure_learning_list
 
 
 def _normalize_answer(value: str) -> str:
@@ -31,40 +32,7 @@ def _normalize_answer(value: str) -> str:
 
 
 def _ensure_learning_size(user):
-    settings, _created = UserSettings.objects.get_or_create(
-        user=user,
-        defaults={
-            "learning_list_size": django_settings.LEARNING_LIST_SIZE,
-            "correct_threshold": django_settings.CORRECT_THRESHOLD,
-        },
-    )
-    target_size = settings.learning_list_size
-    current_count = UserWordProgress.objects.filter(
-        user=user, status=UserWordProgress.Status.LEARNING
-    ).count()
-    if current_count >= target_size:
-        return
-
-    needed = target_size - current_count
-    existing_word_ids = UserWordProgress.objects.filter(user=user).values_list(
-        "word_id", flat=True
-    )
-    word_ids = list(
-        Word.objects.exclude(id__in=existing_word_ids)
-        .order_by("?")
-        .values_list("id", flat=True)[:needed]
-    )
-    if word_ids:
-        UserWordProgress.objects.bulk_create(
-            [
-                UserWordProgress(
-                    user=user,
-                    word_id=word_id,
-                    status=UserWordProgress.Status.LEARNING,
-                )
-                for word_id in word_ids
-            ]
-        )
+    ensure_learning_list.delay(user.id)
 
 
 class ChatQuestionView(APIView):
@@ -157,7 +125,7 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        _ensure_learning_size(user)
+        add_initial_words.delay(user.id)
         return Response({"id": user.id, "email": user.email}, status=status.HTTP_201_CREATED)
 
 
