@@ -14,8 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -sSL https://install.python-poetry.org | python -
 ENV PATH="$POETRY_HOME/bin:$PATH"
 
-COPY pyproject.toml poetry.lock* /app/
-RUN poetry install --no-interaction --no-ansi
+COPY pyproject.toml poetry.lock* README.md /app/
+RUN poetry install --no-interaction --no-ansi --no-root
 
 COPY . /app
 

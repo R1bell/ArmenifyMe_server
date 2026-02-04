@@ -3,7 +3,6 @@ name = "ArmenifyMe"
 version = "0.1.0"
 description = "DRF backend for Armenian learning app"
 authors = ["r1bell <sanamyanraph@gmail.com>"]
-readme = "README.md"
 packages = [{ include = "ArmenifyMe" }]
 
 [tool.poetry.dependencies]

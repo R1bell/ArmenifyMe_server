@@ -37,8 +37,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-admin}
       LEARNING_LIST_SIZE: ${LEARNING_LIST_SIZE:-20}
       CORRECT_THRESHOLD: ${CORRECT_THRESHOLD:-10}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_CACHE_URL: redis://redis:6379/1
+      CACHE_TTL: ${CACHE_TTL:-60}
     ports:
       - "8000:8000"
     command: >
@@ -62,8 +64,10 @@ services:
       DB_PASSWORD: ${DB_PASSWORD:-admin}
       LEARNING_LIST_SIZE: ${LEARNING_LIST_SIZE:-20}
       CORRECT_THRESHOLD: ${CORRECT_THRESHOLD:-10}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/0}
-      CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      REDIS_CACHE_URL: redis://redis:6379/1
+      CACHE_TTL: ${CACHE_TTL:-60}
     command: >
       sh -c "celery -A ArmenifyMe worker -l info"
 

@@ -1,7 +1,13 @@
 from celery import shared_task
 from django.conf import settings as django_settings
+from django.core.cache import cache
 
 from ArmenifyMe.armenify_server.models import User, UserSettings, UserWordProgress, Word
+
+
+def _invalidate_lists(user_id: int) -> None:
+    cache.delete(f"lists:learning:user:{user_id}")
+    cache.delete(f"lists:learned:user:{user_id}")
 
 
 @shared_task
@@ -40,6 +46,7 @@ def add_initial_words(user_id: int) -> int:
             for word_id in word_ids
         ]
     )
+    _invalidate_lists(user.id)
     return len(created)
 
 
@@ -85,4 +92,5 @@ def ensure_learning_list(user_id: int) -> int:
             for word_id in word_ids
         ]
     )
+    _invalidate_lists(user.id)
     return len(created)

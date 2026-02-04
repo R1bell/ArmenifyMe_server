@@ -2,6 +2,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 from django.conf import settings as django_settings
+from django.core.cache import cache
 from rest_framework import permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -28,12 +29,19 @@ from ArmenifyMe.armenify_server.tasks import add_initial_words, ensure_learning_
 
 
 def _normalize_answer(value: str) -> str:
-    return value.strip().lower().replace("ё", "е")
+    return value.strip().lower().replace("\u0451", "\u0435")
 
 
 def _ensure_learning_size(user):
     ensure_learning_list.delay(user.id)
 
+def _cache_key(user_id: int, list_name: str) -> str:
+    return f"lists:{list_name}:user:{user_id}"
+
+
+def _invalidate_lists(user_id: int) -> None:
+    cache.delete(_cache_key(user_id, "learning"))
+    cache.delete(_cache_key(user_id, "learned"))
 
 class ChatQuestionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -102,6 +110,7 @@ class ChatAnswerView(APIView):
             if progress.correct_count >= threshold:
                 progress.status = UserWordProgress.Status.LEARNED
                 progress.save(update_fields=["status"])
+                _invalidate_lists(request.user.id)
                 _ensure_learning_size(request.user)
 
         payload = {
@@ -180,7 +189,14 @@ class LearningListView(APIView):
             .filter(user=request.user, status=UserWordProgress.Status.LEARNING)
             .order_by("created_at")
         )
-        return Response(WordProgressSerializer(items, many=True).data)
+        cache_key = _cache_key(request.user.id, "learning")
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        data = WordProgressSerializer(items, many=True).data
+        cache.set(cache_key, data, timeout=django_settings.CACHE_TTL)
+        return Response(data)
 
 
 class LearningDeleteView(APIView):
@@ -197,6 +213,7 @@ class LearningDeleteView(APIView):
 
         progress.status = UserWordProgress.Status.DELETED
         progress.save(update_fields=["status"])
+        _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
         return Response({"status": "deleted"})
 
@@ -215,6 +232,7 @@ class LearningMoveView(APIView):
 
         progress.status = UserWordProgress.Status.LEARNED
         progress.save(update_fields=["status"])
+        _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
         return Response({"status": "learned"})
 
@@ -231,7 +249,14 @@ class LearnedListView(APIView):
             .filter(user=request.user, status=UserWordProgress.Status.LEARNED)
             .order_by("created_at")
         )
-        return Response(WordProgressSerializer(items, many=True).data)
+        cache_key = _cache_key(request.user.id, "learned")
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        data = WordProgressSerializer(items, many=True).data
+        cache.set(cache_key, data, timeout=django_settings.CACHE_TTL)
+        return Response(data)
 
 
 class LearnedRestoreView(APIView):
@@ -248,6 +273,7 @@ class LearnedRestoreView(APIView):
 
         progress.status = UserWordProgress.Status.LEARNING
         progress.save(update_fields=["status"])
+        _invalidate_lists(request.user.id)
         return Response({"status": "learning"})
 
 
@@ -265,6 +291,7 @@ class LearnedDeleteView(APIView):
 
         progress.status = UserWordProgress.Status.DELETED
         progress.save(update_fields=["status"])
+        _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
         return Response({"status": "deleted"})
 
@@ -291,8 +318,15 @@ class SettingsView(APIView):
         responses=UserSettingsSerializer,
     )
     def patch(self, request):
-        settings, _created = UserSettings.objects.get_or_create(user=request.user)
+        settings, _created = UserSettings.objects.get_or_create(
+            user=request.user,
+            defaults={
+                "learning_list_size": django_settings.LEARNING_LIST_SIZE,
+                "correct_threshold": django_settings.CORRECT_THRESHOLD,
+            },
+        )
         serializer = UserSettingsSerializer(settings, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        _invalidate_lists(request.user.id)
         return Response(serializer.data)

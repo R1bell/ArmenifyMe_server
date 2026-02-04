@@ -86,3 +86,10 @@ celery -A ArmenifyMe worker -l info
 
 Celery worker запускается отдельным сервисом `worker` в `docker-compose.yml`.
 
+## Кэширование
+
+Используется Redis cache (по умолчанию DB 1). В `.env`:
+
+- `REDIS_CACHE_URL=redis://redis:6379/1`
+- `CACHE_TTL=60`
+
