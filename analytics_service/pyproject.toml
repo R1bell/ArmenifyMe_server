@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "analytics-service"
+version = "0.1.0"
+description = "Analytics microservice"
+authors = ["r1bell <sanamyanraph@gmail.com>"]
+packages = [{ include = "analytics_service" }, { include = "analytics" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+django = "6.0.1"
+djangorestframework = "3.16.1"
+psycopg = { version = "3.3.2", extras = ["binary"] }
+celery = "5.4.0"
+
+[build-system]
+requires = ["poetry-core>=1.6.0"]
+build-backend = "poetry.core.masonry.api"

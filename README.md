@@ -72,6 +72,9 @@ docker compose up --build
 
 Swagger UI: `http://127.0.0.1:8000/api/docs/`
 
+Analytics service:
+- `GET http://127.0.0.1:8001/health`
+
 ## Celery
 
 ### Локально

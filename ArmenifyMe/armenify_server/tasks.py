@@ -3,6 +3,7 @@ from django.conf import settings as django_settings
 from django.core.cache import cache
 
 from ArmenifyMe.armenify_server.models import User, UserSettings, UserWordProgress, Word
+from ArmenifyMe.celery import app as celery_app
 
 
 def _invalidate_lists(user_id: int) -> None:
@@ -47,6 +48,10 @@ def add_initial_words(user_id: int) -> int:
         ]
     )
     _invalidate_lists(user.id)
+    celery_app.send_task(
+        "analytics.create_user",
+        args=[user.id, user.email, user.email],
+    )
     return len(created)
 
 
