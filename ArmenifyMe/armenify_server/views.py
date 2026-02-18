@@ -1,5 +1,12 @@
+import hashlib
+import json
+import logging
+import time
+
 from django.db import transaction
+from django.db import IntegrityError
 from django.db.models import F
+from django.db.models import Max
 from django.utils import timezone
 from django.conf import settings as django_settings
 from django.core.cache import cache
@@ -11,7 +18,12 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from ArmenifyMe.armenify_server.models import UserSettings, UserWordProgress, Word
+from ArmenifyMe.armenify_server.models import (
+    ChatAnswerIdempotency,
+    UserSettings,
+    UserWordProgress,
+    Word,
+)
 from ArmenifyMe.armenify_server.serializers import (
     ChatAnswerRequestSerializer,
     ChatAnswerResponseSerializer,
@@ -23,9 +35,12 @@ from ArmenifyMe.armenify_server.serializers import (
     LogoutSerializer,
     RefreshResponseSerializer,
     UserSettingsSerializer,
+    WordProgressListSerializer,
     WordProgressSerializer,
 )
 from ArmenifyMe.armenify_server.tasks import add_initial_words, ensure_learning_list
+
+logger = logging.getLogger(__name__)
 
 
 def _normalize_answer(value: str) -> str:
@@ -39,9 +54,70 @@ def _cache_key(user_id: int, list_name: str) -> str:
     return f"lists:{list_name}:user:{user_id}"
 
 
+def _cache_get(key: str):
+    try:
+        return cache.get(key)
+    except Exception as exc:
+        logger.warning("cache get failed for key=%s: %s", key, exc)
+        return None
+
+
+def _cache_set(key: str, value, timeout: int) -> None:
+    try:
+        cache.set(key, value, timeout=timeout)
+    except Exception as exc:
+        logger.warning("cache set failed for key=%s: %s", key, exc)
+
+
+def _cache_delete(key: str) -> None:
+    try:
+        cache.delete(key)
+    except Exception as exc:
+        logger.warning("cache delete failed for key=%s: %s", key, exc)
+
+
 def _invalidate_lists(user_id: int) -> None:
-    cache.delete(_cache_key(user_id, "learning"))
-    cache.delete(_cache_key(user_id, "learned"))
+    _cache_delete(_cache_key(user_id, "learning"))
+    _cache_delete(_cache_key(user_id, "learned"))
+
+
+def _request_hash(word_id, answer: str) -> str:
+    payload = {
+        "answer": _normalize_answer(answer),
+        "word_id": str(word_id),
+    }
+    canonical = json.dumps(payload, ensure_ascii=True, sort_keys=True)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _build_list_payload(items):
+    serialized_items = WordProgressSerializer(items, many=True).data
+    list_version = items.aggregate(list_version=Max("progress_version"))["list_version"] or 0
+    updated_at = items.aggregate(updated_at=Max("updated_at"))["updated_at"]
+    return {
+        "list_version": list_version,
+        "updated_at": updated_at,
+        "items": serialized_items,
+    }
+
+
+def _recalculate_statuses_sync(user, threshold: int) -> None:
+    learning_qs = UserWordProgress.objects.filter(
+        user=user, status=UserWordProgress.Status.LEARNING
+    )
+    learned_qs = UserWordProgress.objects.filter(
+        user=user, status=UserWordProgress.Status.LEARNED
+    )
+    moved_to_learned = learning_qs.filter(correct_count__gte=threshold).update(
+        status=UserWordProgress.Status.LEARNED,
+        progress_version=F("progress_version") + 1,
+    )
+    moved_to_learning = learned_qs.filter(correct_count__lt=threshold).update(
+        status=UserWordProgress.Status.LEARNING,
+        progress_version=F("progress_version") + 1,
+    )
+    if moved_to_learned or moved_to_learning:
+        _invalidate_lists(user.id)
 
 class ChatQuestionView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -77,50 +153,128 @@ class ChatAnswerView(APIView):
         request=ChatAnswerRequestSerializer,
         responses=ChatAnswerResponseSerializer,
     )
-    @transaction.atomic
     def post(self, request):
+        started = time.monotonic()
+        status_code = status.HTTP_200_OK
+        deduplicated = False
+        client_message_id = None
+
         req = ChatAnswerRequestSerializer(data=request.data)
         req.is_valid(raise_exception=True)
+        client_message_id = req.validated_data["client_message_id"]
         word_id = req.validated_data["word_id"]
         answer = req.validated_data["answer"]
+        req_hash = _request_hash(word_id, answer)
 
-        progress = UserWordProgress.objects.select_related("word").filter(
-            user=request.user, word_id=word_id
+        existing = ChatAnswerIdempotency.objects.filter(
+            user=request.user, client_message_id=client_message_id
         ).first()
-        if not progress or progress.status != UserWordProgress.Status.LEARNING:
-            return Response({"detail": "word not in learning"}, status=status.HTTP_400_BAD_REQUEST)
+        if existing:
+            if existing.request_hash and existing.request_hash != req_hash:
+                status_code = status.HTTP_409_CONFLICT
+                return Response(
+                    {
+                        "error_code": "CHAT_SYNC_CONFLICT",
+                        "message": "client_message_id was already used with another payload",
+                    },
+                    status=status_code,
+                )
+            deduplicated_payload = dict(existing.response_payload)
+            deduplicated_payload["deduplicated"] = True
+            deduplicated = True
+            return Response(deduplicated_payload, status=status_code)
 
-        translations = progress.word.translations or []
-        normalized = _normalize_answer(answer)
-        normalized_translations = [_normalize_answer(t) for t in translations]
-        correct = normalized in normalized_translations
+        try:
+            with transaction.atomic():
+                progress = (
+                    UserWordProgress.objects.select_for_update()
+                    .select_related("word")
+                    .filter(user=request.user, word_id=word_id)
+                    .first()
+                )
+                if not progress or progress.status != UserWordProgress.Status.LEARNING:
+                    status_code = status.HTTP_400_BAD_REQUEST
+                    return Response(
+                        {"error_code": "CHAT_INVALID_WORD", "message": "word not in learning"},
+                        status=status_code,
+                    )
 
-        threshold = (
-            UserSettings.objects.filter(user=request.user)
-            .values_list("correct_threshold", flat=True)
-            .first()
-        )
-        if threshold is None:
-            threshold = django_settings.CORRECT_THRESHOLD
+                translations = progress.word.translations or []
+                normalized = _normalize_answer(answer)
+                normalized_translations = [_normalize_answer(t) for t in translations]
+                correct = normalized in normalized_translations
 
-        if correct:
-            progress.correct_count = F("correct_count") + 1
-            progress.save(update_fields=["correct_count"])
-            progress.refresh_from_db(fields=["correct_count"])
-            if progress.correct_count >= threshold:
-                progress.status = UserWordProgress.Status.LEARNED
-                progress.save(update_fields=["status"])
-                _invalidate_lists(request.user.id)
-                _ensure_learning_size(request.user)
+                threshold = (
+                    UserSettings.objects.filter(user=request.user)
+                    .values_list("correct_threshold", flat=True)
+                    .first()
+                )
+                if threshold is None:
+                    threshold = django_settings.CORRECT_THRESHOLD
 
-        payload = {
-            "correct": correct,
-            "correct_count": progress.correct_count,
-            "threshold": threshold,
-            "status": progress.status,
-            "expected_translations": translations,
-        }
-        return Response(ChatAnswerResponseSerializer(payload).data)
+                if correct:
+                    progress.correct_count += 1
+                    progress.progress_version += 1
+                    if progress.correct_count >= threshold:
+                        progress.status = UserWordProgress.Status.LEARNED
+                    progress.save(update_fields=["correct_count", "progress_version", "status"])
+
+                processed_at = timezone.now().isoformat().replace("+00:00", "Z")
+                payload = {
+                    "client_message_id": client_message_id,
+                    "server_event_id": str(progress.id),
+                    "deduplicated": False,
+                    "correct": correct,
+                    "correct_count": progress.correct_count,
+                    "threshold": threshold,
+                    "status": progress.status,
+                    "expected_translations": translations,
+                    "progress_version": progress.progress_version,
+                    "processed_at": processed_at,
+                }
+                try:
+                    ChatAnswerIdempotency.objects.create(
+                        user=request.user,
+                        client_message_id=client_message_id,
+                        request_hash=req_hash,
+                        response_payload=payload,
+                    )
+                except IntegrityError:
+                    existing = ChatAnswerIdempotency.objects.select_for_update().filter(
+                        user=request.user, client_message_id=client_message_id
+                    ).first()
+                    if existing and existing.request_hash and existing.request_hash != req_hash:
+                        status_code = status.HTTP_409_CONFLICT
+                        return Response(
+                            {
+                                "error_code": "CHAT_SYNC_CONFLICT",
+                                "message": "client_message_id was already used with another payload",
+                            },
+                            status=status_code,
+                        )
+                    if existing:
+                        deduplicated_payload = dict(existing.response_payload)
+                        deduplicated_payload["deduplicated"] = True
+                        deduplicated = True
+                        return Response(deduplicated_payload, status=status_code)
+                    raise
+
+                if correct and progress.status == UserWordProgress.Status.LEARNED:
+                    _invalidate_lists(request.user.id)
+                    _ensure_learning_size(request.user)
+
+                serialized = ChatAnswerResponseSerializer(payload).data
+                return Response(serialized, status=status_code)
+        finally:
+            latency_ms = int((time.monotonic() - started) * 1000)
+            logger.info(
+                "chat_answer user_id=%s client_message_id=%s deduplicated=%s status_code=%s latency_ms=%s",
+                request.user.id,
+                client_message_id,
+                deduplicated,
+                status_code,
+                latency_ms,
+            )
 
 
 class RegisterView(APIView):
@@ -181,7 +335,7 @@ class LearningListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
-        responses=WordProgressSerializer(many=True),
+        responses=WordProgressListSerializer,
     )
     def get(self, request):
         items = (
@@ -190,12 +344,12 @@ class LearningListView(APIView):
             .order_by("created_at")
         )
         cache_key = _cache_key(request.user.id, "learning")
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached is not None:
             return Response(cached)
 
-        data = WordProgressSerializer(items, many=True).data
-        cache.set(cache_key, data, timeout=django_settings.CACHE_TTL)
+        data = _build_list_payload(items)
+        _cache_set(cache_key, data, timeout=django_settings.CACHE_TTL)
         return Response(data)
 
 
@@ -212,7 +366,8 @@ class LearningDeleteView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
 
         progress.status = UserWordProgress.Status.DELETED
-        progress.save(update_fields=["status"])
+        progress.progress_version += 1
+        progress.save(update_fields=["status", "progress_version"])
         _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
         return Response({"status": "deleted"})
@@ -231,7 +386,8 @@ class LearningMoveView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
 
         progress.status = UserWordProgress.Status.LEARNED
-        progress.save(update_fields=["status"])
+        progress.progress_version += 1
+        progress.save(update_fields=["status", "progress_version"])
         _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
         return Response({"status": "learned"})
@@ -241,7 +397,7 @@ class LearnedListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(
-        responses=WordProgressSerializer(many=True),
+        responses=WordProgressListSerializer,
     )
     def get(self, request):
         items = (
@@ -250,12 +406,12 @@ class LearnedListView(APIView):
             .order_by("created_at")
         )
         cache_key = _cache_key(request.user.id, "learned")
-        cached = cache.get(cache_key)
+        cached = _cache_get(cache_key)
         if cached is not None:
             return Response(cached)
 
-        data = WordProgressSerializer(items, many=True).data
-        cache.set(cache_key, data, timeout=django_settings.CACHE_TTL)
+        data = _build_list_payload(items)
+        _cache_set(cache_key, data, timeout=django_settings.CACHE_TTL)
         return Response(data)
 
 
@@ -272,7 +428,8 @@ class LearnedRestoreView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
 
         progress.status = UserWordProgress.Status.LEARNING
-        progress.save(update_fields=["status"])
+        progress.progress_version += 1
+        progress.save(update_fields=["status", "progress_version"])
         _invalidate_lists(request.user.id)
         return Response({"status": "learning"})
 
@@ -290,7 +447,8 @@ class LearnedDeleteView(APIView):
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
 
         progress.status = UserWordProgress.Status.DELETED
-        progress.save(update_fields=["status"])
+        progress.progress_version += 1
+        progress.save(update_fields=["status", "progress_version"])
         _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
         return Response({"status": "deleted"})
@@ -328,5 +486,7 @@ class SettingsView(APIView):
         serializer = UserSettingsSerializer(settings, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        _recalculate_statuses_sync(request.user, serializer.instance.correct_threshold)
+        ensure_learning_list(request.user.id)
         _invalidate_lists(request.user.id)
         return Response(serializer.data)

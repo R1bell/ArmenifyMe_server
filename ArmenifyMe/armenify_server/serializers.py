@@ -20,16 +20,22 @@ class ChatQuestionSerializer(serializers.Serializer):
 
 
 class ChatAnswerRequestSerializer(serializers.Serializer):
+    client_message_id = serializers.CharField(max_length=128)
     word_id = serializers.UUIDField()
     answer = serializers.CharField()
 
 
 class ChatAnswerResponseSerializer(serializers.Serializer):
+    client_message_id = serializers.CharField()
+    server_event_id = serializers.UUIDField()
+    deduplicated = serializers.BooleanField()
     correct = serializers.BooleanField()
     correct_count = serializers.IntegerField()
     threshold = serializers.IntegerField()
     status = serializers.CharField()
     expected_translations = serializers.ListField(child=serializers.CharField())
+    progress_version = serializers.IntegerField()
+    processed_at = serializers.DateTimeField()
 
 
 class WordProgressSerializer(serializers.ModelSerializer):
@@ -47,6 +53,12 @@ class UserSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserSettings
         fields = ["correct_threshold", "learning_list_size"]
+
+
+class WordProgressListSerializer(serializers.Serializer):
+    list_version = serializers.IntegerField()
+    updated_at = serializers.DateTimeField(allow_null=True)
+    items = WordProgressSerializer(many=True)
 
 
 class RegisterSerializer(serializers.Serializer):

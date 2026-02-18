@@ -57,6 +57,7 @@ class UserWordProgress(models.Model):
     word = models.ForeignKey(Word, on_delete=models.CASCADE)
     status = models.CharField(max_length=16, choices=Status.choices)
     correct_count = models.IntegerField(default=0)
+    progress_version = models.PositiveIntegerField(default=0)
     last_asked_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -88,3 +89,19 @@ class ChatMessage(models.Model):
     word = models.ForeignKey(Word, on_delete=models.SET_NULL, null=True, blank=True)
     content = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class ChatAnswerIdempotency(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    client_message_id = models.CharField(max_length=128)
+    request_hash = models.CharField(max_length=64, null=True, blank=True)
+    response_payload = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "client_message_id"],
+                name="uq_chat_answer_idempotency_user_client_message",
+            ),
+        ]
