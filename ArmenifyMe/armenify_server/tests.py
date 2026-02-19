@@ -187,3 +187,24 @@ class WordListTests(APITestCase):
         self.assertIn("id", response.data[0])
         self.assertIn("armenian", response.data[0])
         self.assertIn("translations", response.data[0])
+        self.assertIn("text", response.data[0])
+
+    def test_list_all_words_returns_latest_comment_text(self):
+        self.client.force_authenticate(self.user)
+        self.client.post(
+            f"/api/v1/words/{self.word1.id}/comment",
+            data={"text": "Старый комментарий"},
+            format="json",
+        )
+        self.client.post(
+            f"/api/v1/words/{self.word1.id}/comment",
+            data={"text": "Актуальный комментарий"},
+            format="json",
+        )
+
+        response = self.client.get("/api/v1/words")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        by_id = {item["id"]: item for item in response.data}
+        self.assertEqual(by_id[str(self.word1.id)]["text"], "Актуальный комментарий")
+        self.assertIsNone(by_id[str(self.word2.id)]["text"])

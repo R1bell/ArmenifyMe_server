@@ -60,9 +60,15 @@ class WordProgressSerializer(serializers.ModelSerializer):
 
 
 class WordListSerializer(serializers.ModelSerializer):
+    text = serializers.SerializerMethodField()
+
+    def get_text(self, obj):
+        comment_by_word = self.context.get("comment_by_word", {})
+        return comment_by_word.get(str(obj.id))
+
     class Meta:
         model = Word
-        fields = ["id", "armenian", "translations", "transcription", "level"]
+        fields = ["id", "armenian", "translations", "transcription", "level", "text"]
 
 
 class UserSettingsSerializer(serializers.ModelSerializer):
