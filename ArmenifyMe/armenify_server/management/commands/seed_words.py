@@ -5739,6 +5739,15 @@ class Command(BaseCommand):
         }
 ]
 
+        unique_words = []
+        seen_armenian = set()
+        for w in words:
+            key = w["armenian"]
+            if key in seen_armenian:
+                continue
+            seen_armenian.add(key)
+            unique_words.append(w)
+
         Word.objects.all().delete()
         Word.objects.bulk_create(
             [
@@ -5748,7 +5757,14 @@ class Command(BaseCommand):
                     transcription=w["transcription"],
                     level="A1",
                 )
-                for w in words
+                for w in unique_words
             ]
         )
-        self.stdout.write(self.style.SUCCESS(f"Inserted {len(words)} words"))
+        duplicates = len(words) - len(unique_words)
+        if duplicates:
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Removed {duplicates} duplicate armenian entries before insert"
+                )
+            )
+        self.stdout.write(self.style.SUCCESS(f"Inserted {len(unique_words)} words"))
