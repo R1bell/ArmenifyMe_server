@@ -111,6 +111,21 @@ def _request_hash(word_id, answer: str) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _latest_comment_text_by_word(user, word_ids):
+    comments = (
+        WordComment.objects.filter(user=user, word_id__in=word_ids)
+        .order_by("word_id", "-created_at")
+        .values("word_id", "text")
+    )
+    result = {}
+    for comment in comments:
+        word_id = str(comment["word_id"])
+        if word_id in result:
+            continue
+        result[word_id] = comment["text"]
+    return result
+
+
 def _build_list_payload(items):
     serialized_items = WordProgressSerializer(items, many=True).data
     list_version = items.aggregate(list_version=Max("progress_version"))["list_version"] or 0
@@ -382,7 +397,15 @@ class WordListView(APIView):
     )
     def get(self, request):
         words = Word.objects.order_by("created_at")
-        return Response(WordListSerializer(words, many=True).data)
+        word_ids = list(words.values_list("id", flat=True))
+        comment_by_word = _latest_comment_text_by_word(request.user, word_ids) if word_ids else {}
+        return Response(
+            WordListSerializer(
+                words,
+                many=True,
+                context={"comment_by_word": comment_by_word},
+            ).data
+        )
 
 
 class LearningDeleteView(APIView):
