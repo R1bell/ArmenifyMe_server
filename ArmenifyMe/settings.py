@@ -32,6 +32,39 @@ def _load_env(path: Path) -> None:
 
 _load_env(BASE_DIR / ".env")
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_list(name: str, default: list[str] | None = None) -> list[str]:
+    value = os.getenv(name)
+    if value is None or not value.strip():
+        return list(default or [])
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return int(value)
+
+
+def _env_str(
+    name: str,
+    default: str,
+    aliases: tuple[str, ...] = (),
+) -> str:
+    for key in (name, *aliases):
+        value = os.getenv(key)
+        if value is not None and value.strip():
+            return value.strip()
+    return default
+
 LEARNING_LIST_SIZE = int(os.getenv("LEARNING_LIST_SIZE", "20"))
 CORRECT_THRESHOLD = int(os.getenv("CORRECT_THRESHOLD", "10"))
 CACHE_TTL = int(os.getenv("CACHE_TTL", "60"))
@@ -101,11 +134,11 @@ WSGI_APPLICATION = 'ArmenifyMe.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME', 'postgres'),
-        'USER': os.getenv('DB_USER', 'postgres'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'admin'),
-        'HOST': os.getenv('DB_HOST', '127.0.0.1'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+        'NAME': _env_str('DB_NAME', 'postgres', aliases=('PGDATABASE',)),
+        'USER': _env_str('DB_USER', 'postgres', aliases=('PGUSER',)),
+        'PASSWORD': _env_str('DB_PASSWORD', 'admin', aliases=('PGPASSWORD',)),
+        'HOST': _env_str('DB_HOST', '127.0.0.1', aliases=('PGHOST',)),
+        'PORT': _env_str('DB_PORT', '5432', aliases=('PGPORT',)),
     }
 }
 
