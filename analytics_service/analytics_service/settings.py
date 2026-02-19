@@ -51,8 +51,53 @@ def _env_str(
     return default
 
 SECRET_KEY = os.getenv("ANALYTICS_SECRET_KEY", "analytics-insecure-change-me")
-DEBUG = True
-ALLOWED_HOSTS = []
+DEBUG = _env_bool("ANALYTICS_DEBUG", _env_bool("DEBUG", True))
+ALLOWED_HOSTS = _env_list(
+    "ANALYTICS_ALLOWED_HOSTS",
+    _env_list("ALLOWED_HOSTS", ["127.0.0.1", "localhost"]),
+)
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+if RAILWAY_PUBLIC_DOMAIN:
+    ALLOWED_HOSTS.append(RAILWAY_PUBLIC_DOMAIN)
+ALLOWED_HOSTS = list(dict.fromkeys(ALLOWED_HOSTS))
+
+CSRF_TRUSTED_ORIGINS = _env_list(
+    "ANALYTICS_CSRF_TRUSTED_ORIGINS",
+    _env_list("CSRF_TRUSTED_ORIGINS", []),
+)
+if RAILWAY_PUBLIC_DOMAIN:
+    CSRF_TRUSTED_ORIGINS.append(f"https://{RAILWAY_PUBLIC_DOMAIN}")
+CSRF_TRUSTED_ORIGINS = list(dict.fromkeys(CSRF_TRUSTED_ORIGINS))
+
+USE_X_FORWARDED_HOST = _env_bool(
+    "ANALYTICS_USE_X_FORWARDED_HOST",
+    _env_bool("USE_X_FORWARDED_HOST", True),
+)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_SSL_REDIRECT = _env_bool(
+    "ANALYTICS_SECURE_SSL_REDIRECT",
+    _env_bool("SECURE_SSL_REDIRECT", not DEBUG),
+)
+SESSION_COOKIE_SECURE = _env_bool(
+    "ANALYTICS_SESSION_COOKIE_SECURE",
+    _env_bool("SESSION_COOKIE_SECURE", not DEBUG),
+)
+CSRF_COOKIE_SECURE = _env_bool(
+    "ANALYTICS_CSRF_COOKIE_SECURE",
+    _env_bool("CSRF_COOKIE_SECURE", not DEBUG),
+)
+SECURE_HSTS_SECONDS = _env_int(
+    "ANALYTICS_SECURE_HSTS_SECONDS",
+    _env_int("SECURE_HSTS_SECONDS", 0),
+)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = _env_bool(
+    "ANALYTICS_SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    _env_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", False),
+)
+SECURE_HSTS_PRELOAD = _env_bool(
+    "ANALYTICS_SECURE_HSTS_PRELOAD",
+    _env_bool("SECURE_HSTS_PRELOAD", False),
+)
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
@@ -127,3 +172,12 @@ REST_FRAMEWORK = {
 CELERY_BROKER_URL = os.getenv("ANALYTICS_CELERY_BROKER_URL", "amqp://guest:guest@rabbitmq:5672//")
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
+CELERY_TASK_DEFAULT_QUEUE = os.getenv(
+    "ANALYTICS_CELERY_TASK_DEFAULT_QUEUE",
+    os.getenv("CELERY_ANALYTICS_QUEUE", "analytics"),
+)
+CELERY_TASK_ROUTES = {
+    "analytics.create_user": {
+        "queue": os.getenv("CELERY_ANALYTICS_QUEUE", "analytics"),
+    },
+}
