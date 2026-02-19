@@ -38,6 +38,18 @@ def _env_int(name: str, default: int) -> int:
         return default
     return int(value)
 
+
+def _env_str(
+    name: str,
+    default: str,
+    aliases: tuple[str, ...] = (),
+) -> str:
+    for key in (name, *aliases):
+        value = os.getenv(key)
+        if value is not None and value.strip():
+            return value.strip()
+    return default
+
 SECRET_KEY = os.getenv("ANALYTICS_SECRET_KEY", "analytics-insecure-change-me")
 DEBUG = _env_bool("ANALYTICS_DEBUG", _env_bool("DEBUG", True))
 ALLOWED_HOSTS = _env_list(
@@ -129,11 +141,19 @@ WSGI_APPLICATION = "analytics_service.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("ANALYTICS_DB_NAME", "analytics"),
-        "USER": os.getenv("ANALYTICS_DB_USER", "postgres"),
-        "PASSWORD": os.getenv("ANALYTICS_DB_PASSWORD", "admin"),
-        "HOST": os.getenv("ANALYTICS_DB_HOST", "127.0.0.1"),
-        "PORT": os.getenv("ANALYTICS_DB_PORT", "5432"),
+        "NAME": _env_str(
+            "ANALYTICS_DB_NAME",
+            "analytics",
+            aliases=("PGDATABASE",),
+        ),
+        "USER": _env_str("ANALYTICS_DB_USER", "postgres", aliases=("PGUSER",)),
+        "PASSWORD": _env_str(
+            "ANALYTICS_DB_PASSWORD",
+            "admin",
+            aliases=("PGPASSWORD",),
+        ),
+        "HOST": _env_str("ANALYTICS_DB_HOST", "127.0.0.1", aliases=("PGHOST",)),
+        "PORT": _env_str("ANALYTICS_DB_PORT", "5432", aliases=("PGPORT",)),
     }
 }
 
