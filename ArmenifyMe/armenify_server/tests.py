@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -7,8 +9,24 @@ from ArmenifyMe.armenify_server.models import UserSettings, UserWordProgress, Wo
 User = get_user_model()
 
 
-class ChatAnswerIdempotencyTests(APITestCase):
+class BaseAPITestCase(APITestCase):
     def setUp(self):
+        super().setUp()
+        self._ensure_learning_delay_patcher = patch(
+            "ArmenifyMe.armenify_server.views.ensure_learning_list.delay"
+        )
+        self._add_initial_delay_patcher = patch(
+            "ArmenifyMe.armenify_server.views.add_initial_words.delay"
+        )
+        self._ensure_learning_delay_patcher.start()
+        self._add_initial_delay_patcher.start()
+        self.addCleanup(self._ensure_learning_delay_patcher.stop)
+        self.addCleanup(self._add_initial_delay_patcher.stop)
+
+
+class ChatAnswerIdempotencyTests(BaseAPITestCase):
+    def setUp(self):
+        super().setUp()
         self.user = User.objects.create_user(email="u@example.com", password="secret123")
         self.client.force_authenticate(self.user)
         self.word = Word.objects.create(
@@ -67,8 +85,9 @@ class ChatAnswerIdempotencyTests(APITestCase):
         self.assertIn("items", response.data)
 
 
-class ManualProgressFlowTests(APITestCase):
+class ManualProgressFlowTests(BaseAPITestCase):
     def setUp(self):
+        super().setUp()
         self.user = User.objects.create_user(email="manual@example.com", password="secret123")
         self.client.force_authenticate(self.user)
         self.word = Word.objects.create(
@@ -140,8 +159,9 @@ class ManualProgressFlowTests(APITestCase):
         self.assertTrue(self.progress.manual_override)
 
 
-class WordCommentTests(APITestCase):
+class WordCommentTests(BaseAPITestCase):
     def setUp(self):
+        super().setUp()
         self.user = User.objects.create_user(email="commenter@example.com", password="secret123")
         self.word = Word.objects.create(
             armenian="\u0562\u0561\u0580\u0587\u0587",
@@ -162,8 +182,9 @@ class WordCommentTests(APITestCase):
         self.assertEqual(WordComment.objects.filter(user=self.user, word=self.word).count(), 1)
 
 
-class WordListTests(APITestCase):
+class WordListTests(BaseAPITestCase):
     def setUp(self):
+        super().setUp()
         self.user = User.objects.create_user(email="words@example.com", password="secret123")
         self.word1 = Word.objects.create(
             armenian="\u0562\u0561\u0580\u0587\u0587",

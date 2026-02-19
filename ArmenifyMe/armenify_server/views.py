@@ -56,7 +56,17 @@ def _normalize_answer(value: str) -> str:
 
 
 def _ensure_learning_size(user):
-    ensure_learning_list.delay(user.id)
+    try:
+        ensure_learning_list.delay(user.id)
+    except Exception as exc:
+        logger.warning("failed to enqueue ensure_learning_list for user_id=%s: %s", user.id, exc)
+
+
+def _enqueue_add_initial_words(user):
+    try:
+        add_initial_words.delay(user.id)
+    except Exception as exc:
+        logger.warning("failed to enqueue add_initial_words for user_id=%s: %s", user.id, exc)
 
 def _cache_key(user_id: int, list_name: str) -> str:
     return f"lists:{list_name}:user:{user_id}"
@@ -281,7 +291,7 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        add_initial_words.delay(user.id)
+        _enqueue_add_initial_words(user)
         return Response({"id": user.id, "email": user.email}, status=status.HTTP_201_CREATED)
 
 
