@@ -20,19 +20,22 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from ArmenifyMe.armenify_server.models import (
     ChatAnswerIdempotency,
+    UserChatHistory,
     UserSettings,
     UserWordProgress,
-    Word,
 )
 from ArmenifyMe.armenify_server.serializers import (
     ChatAnswerRequestSerializer,
     ChatAnswerResponseSerializer,
-    ChatQuestionSerializer,
+    ChatHistoryRequestSerializer,
+    ChatHistoryResponseSerializer,
+    LearnedRestoreRequestSerializer,
+    LearningMoveRequestSerializer,
     LoginSerializer,
     LoginResponseSerializer,
+    LogoutSerializer,
     RegisterSerializer,
     RegisterResponseSerializer,
-    LogoutSerializer,
     RefreshResponseSerializer,
     UserSettingsSerializer,
     WordProgressListSerializer,
@@ -76,6 +79,9 @@ def _cache_delete(key: str) -> None:
         logger.warning("cache delete failed for key=%s: %s", key, exc)
 
 
+CHAT_HISTORY_MAX = 50
+
+
 def _invalidate_lists(user_id: int) -> None:
     _cache_delete(_cache_key(user_id, "learning"))
     _cache_delete(_cache_key(user_id, "learned"))
@@ -101,12 +107,20 @@ def _build_list_payload(items):
     }
 
 
+def _learning_items_queryset(user):
+    return (
+        UserWordProgress.objects.select_related("word")
+        .filter(user=user, status=UserWordProgress.Status.LEARNING)
+        .order_by("created_at")
+    )
+
+
 def _recalculate_statuses_sync(user, threshold: int) -> None:
     learning_qs = UserWordProgress.objects.filter(
-        user=user, status=UserWordProgress.Status.LEARNING
+        user=user, status=UserWordProgress.Status.LEARNING, manual_override=False
     )
     learned_qs = UserWordProgress.objects.filter(
-        user=user, status=UserWordProgress.Status.LEARNED
+        user=user, status=UserWordProgress.Status.LEARNED, manual_override=False
     )
     moved_to_learned = learning_qs.filter(correct_count__gte=threshold).update(
         status=UserWordProgress.Status.LEARNED,
@@ -118,32 +132,6 @@ def _recalculate_statuses_sync(user, threshold: int) -> None:
     )
     if moved_to_learned or moved_to_learning:
         _invalidate_lists(user.id)
-
-class ChatQuestionView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    @extend_schema(
-        responses=ChatQuestionSerializer,
-    )
-    def get(self, request):
-        progress = (
-            UserWordProgress.objects.select_related("word")
-            .filter(user=request.user, status=UserWordProgress.Status.LEARNING)
-            .order_by(F("last_asked_at").asc(nulls_first=True))
-            .first()
-        )
-        if not progress:
-            return Response({"detail": "no learning words"}, status=status.HTTP_404_NOT_FOUND)
-
-        progress.last_asked_at = timezone.now()
-        progress.save(update_fields=["last_asked_at"])
-
-        payload = {
-            "word_id": progress.word.id,
-            "armenian": progress.word.armenian,
-            "transcription": progress.word.transcription,
-        }
-        return Response(ChatQuestionSerializer(payload).data)
 
 
 class ChatAnswerView(APIView):
@@ -338,18 +326,36 @@ class LearningListView(APIView):
         responses=WordProgressListSerializer,
     )
     def get(self, request):
-        items = (
-            UserWordProgress.objects.select_related("word")
-            .filter(user=request.user, status=UserWordProgress.Status.LEARNING)
-            .order_by("created_at")
-        )
         cache_key = _cache_key(request.user.id, "learning")
         cached = _cache_get(cache_key)
         if cached is not None:
             return Response(cached)
 
+        items = _learning_items_queryset(request.user)
         data = _build_list_payload(items)
-        _cache_set(cache_key, data, timeout=django_settings.CACHE_TTL)
+
+        if not data["items"]:
+            # Fallback for first login when worker is unavailable.
+            ensure_learning_list(request.user.id)
+            items = _learning_items_queryset(request.user)
+            data = _build_list_payload(items)
+
+        if data["items"]:
+            _cache_set(cache_key, data, timeout=django_settings.CACHE_TTL)
+        return Response(data)
+
+
+class LearningRefillView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        responses=WordProgressListSerializer,
+    )
+    def post(self, request):
+        ensure_learning_list(request.user.id)
+        items = _learning_items_queryset(request.user)
+        data = _build_list_payload(items)
+        _cache_set(_cache_key(request.user.id, "learning"), data, timeout=django_settings.CACHE_TTL)
         return Response(data)
 
 
@@ -378,19 +384,25 @@ class LearningMoveView(APIView):
 
     @transaction.atomic
     @extend_schema(
+        request=LearningMoveRequestSerializer,
         responses=None,
     )
     def post(self, request, word_id):
+        req = LearningMoveRequestSerializer(data=request.data)
+        req.is_valid(raise_exception=True)
+        manual = req.validated_data["manual"]
+
         progress = UserWordProgress.objects.filter(user=request.user, word_id=word_id).first()
         if not progress:
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
 
         progress.status = UserWordProgress.Status.LEARNED
+        progress.manual_override = manual
         progress.progress_version += 1
-        progress.save(update_fields=["status", "progress_version"])
+        progress.save(update_fields=["status", "manual_override", "progress_version"])
         _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
-        return Response({"status": "learned"})
+        return Response({"status": "learned", "manual": manual})
 
 
 class LearnedListView(APIView):
@@ -420,18 +432,28 @@ class LearnedRestoreView(APIView):
 
     @transaction.atomic
     @extend_schema(
+        request=LearnedRestoreRequestSerializer,
         responses=None,
     )
     def post(self, request, word_id):
+        req = LearnedRestoreRequestSerializer(data=request.data)
+        req.is_valid(raise_exception=True)
+        reset_progress = req.validated_data["reset_progress"]
+
         progress = UserWordProgress.objects.filter(user=request.user, word_id=word_id).first()
         if not progress:
             return Response({"detail": "not found"}, status=status.HTTP_404_NOT_FOUND)
 
         progress.status = UserWordProgress.Status.LEARNING
+        progress.manual_override = False
+        update_fields = ["status", "manual_override", "progress_version"]
+        if reset_progress:
+            progress.correct_count = 0
+            update_fields.append("correct_count")
         progress.progress_version += 1
-        progress.save(update_fields=["status", "progress_version"])
+        progress.save(update_fields=update_fields)
         _invalidate_lists(request.user.id)
-        return Response({"status": "learning"})
+        return Response({"status": "learning", "reset_progress": reset_progress})
 
 
 class LearnedDeleteView(APIView):
@@ -452,6 +474,43 @@ class LearnedDeleteView(APIView):
         _invalidate_lists(request.user.id)
         _ensure_learning_size(request.user)
         return Response({"status": "deleted"})
+
+
+class ChatHistoryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        responses=ChatHistoryResponseSerializer,
+        description="Return the last up to 50 chat messages for the current user.",
+    )
+    def get(self, request):
+        obj = UserChatHistory.objects.filter(user=request.user).first()
+        messages = (obj.messages if obj else [])[-CHAT_HISTORY_MAX:]
+        updated_at = obj.updated_at if obj else None
+        return Response(
+            ChatHistoryResponseSerializer(
+                {"messages": messages, "updated_at": updated_at}
+            ).data
+        )
+
+    @extend_schema(
+        request=ChatHistoryRequestSerializer,
+        responses=ChatHistoryResponseSerializer,
+        description="Save the last 50 chat messages. Older entries are truncated.",
+    )
+    def put(self, request):
+        ser = ChatHistoryRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        messages = ser.validated_data["messages"][-CHAT_HISTORY_MAX:]
+        obj, _ = UserChatHistory.objects.update_or_create(
+            user=request.user,
+            defaults={"messages": messages},
+        )
+        return Response(
+            ChatHistoryResponseSerializer(
+                {"messages": obj.messages, "updated_at": obj.updated_at}
+            ).data
+        )
 
 
 class SettingsView(APIView):

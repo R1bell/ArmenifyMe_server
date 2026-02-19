@@ -13,16 +13,18 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["id", "username", "email"]
 
 
-class ChatQuestionSerializer(serializers.Serializer):
-    word_id = serializers.UUIDField()
-    armenian = serializers.CharField()
-    transcription = serializers.CharField()
-
-
 class ChatAnswerRequestSerializer(serializers.Serializer):
     client_message_id = serializers.CharField(max_length=128)
     word_id = serializers.UUIDField()
     answer = serializers.CharField()
+
+
+class LearningMoveRequestSerializer(serializers.Serializer):
+    manual = serializers.BooleanField(required=False, default=False)
+
+
+class LearnedRestoreRequestSerializer(serializers.Serializer):
+    reset_progress = serializers.BooleanField(required=False, default=False)
 
 
 class ChatAnswerResponseSerializer(serializers.Serializer):
@@ -43,10 +45,18 @@ class WordProgressSerializer(serializers.ModelSerializer):
     armenian = serializers.CharField(source="word.armenian", read_only=True)
     transcription = serializers.CharField(source="word.transcription", read_only=True)
     translations = serializers.JSONField(source="word.translations", read_only=True)
+    manual = serializers.BooleanField(source="manual_override", read_only=True)
 
     class Meta:
         model = UserWordProgress
-        fields = ["word_id", "armenian", "transcription", "translations", "correct_count"]
+        fields = [
+            "word_id",
+            "armenian",
+            "transcription",
+            "translations",
+            "correct_count",
+            "manual",
+        ]
 
 
 class UserSettingsSerializer(serializers.ModelSerializer):
@@ -100,3 +110,32 @@ class LogoutSerializer(serializers.Serializer):
 
 class RefreshResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
+
+
+class ChatHistoryMessageSerializer(serializers.Serializer):
+    id = serializers.CharField(required=False, allow_blank=True)
+    role = serializers.ChoiceField(choices=["receiver", "sender"])
+    text = serializers.CharField()
+    meta = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    correct = serializers.BooleanField(required=False, allow_null=True)
+    badge = serializers.DictField(required=False, allow_null=True)
+    wordId = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    armenian = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    translations = serializers.ListField(
+        child=serializers.CharField(), required=False, allow_null=True
+    )
+    clientMessageId = serializers.CharField(
+        required=False, allow_blank=True, allow_null=True
+    )
+    syncStatus = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    syncAttempts = serializers.IntegerField(required=False, allow_null=True)
+    syncError = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+
+class ChatHistoryResponseSerializer(serializers.Serializer):
+    messages = serializers.ListField(child=serializers.DictField(), allow_empty=True)
+    updated_at = serializers.DateTimeField(allow_null=True)
+
+
+class ChatHistoryRequestSerializer(serializers.Serializer):
+    messages = ChatHistoryMessageSerializer(many=True)
