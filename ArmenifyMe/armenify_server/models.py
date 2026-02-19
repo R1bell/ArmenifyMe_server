@@ -105,3 +105,11 @@ class ChatAnswerIdempotency(models.Model):
                 name="uq_chat_answer_idempotency_user_client_message",
             ),
         ]
+
+
+class WordComment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    word = models.ForeignKey(Word, on_delete=models.CASCADE, related_name="comments")
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)

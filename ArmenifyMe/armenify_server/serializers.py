@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
-from ArmenifyMe.armenify_server.models import UserSettings, UserWordProgress
+from ArmenifyMe.armenify_server.models import UserSettings, UserWordProgress, Word, WordComment
 
 User = get_user_model()
 
@@ -47,6 +47,12 @@ class WordProgressSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserWordProgress
         fields = ["word_id", "armenian", "transcription", "translations", "correct_count"]
+
+
+class WordListSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Word
+        fields = ["id", "armenian", "translations", "transcription", "level"]
 
 
 class UserSettingsSerializer(serializers.ModelSerializer):
@@ -100,3 +106,21 @@ class LogoutSerializer(serializers.Serializer):
 
 class RefreshResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
+
+
+class WordCommentCreateSerializer(serializers.Serializer):
+    text = serializers.CharField(max_length=2000)
+
+    def validate_text(self, value):
+        text = value.strip()
+        if not text:
+            raise serializers.ValidationError("comment text cannot be empty")
+        return text
+
+
+class WordCommentResponseSerializer(serializers.ModelSerializer):
+    word_id = serializers.UUIDField(source="word.id", read_only=True)
+
+    class Meta:
+        model = WordComment
+        fields = ["id", "word_id", "text", "created_at"]
