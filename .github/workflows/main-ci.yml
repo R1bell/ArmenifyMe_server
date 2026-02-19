@@ -1,0 +1,89 @@
+name: Main Branch CI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  tests:
+    name: Django Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: admin
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        run: pip install poetry
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Run tests
+        run: poetry run python manage.py test
+
+  docker-smoke:
+    name: Docker Build And Run Smoke Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build app image
+        run: docker compose build app
+
+      - name: Start app stack
+        run: docker compose up -d db redis rabbitmq app
+
+      - name: Wait for app startup
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/api/docs/ >/dev/null; then
+              echo "App is up"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "App did not become ready in time"
+          exit 1
+
+      - name: Show compose status
+        if: always()
+        run: docker compose ps
+
+      - name: Show app logs on failure
+        if: failure()
+        run: docker compose logs app
+
+      - name: Stop stack
+        if: always()
+        run: docker compose down -v

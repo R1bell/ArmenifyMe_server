@@ -112,3 +112,11 @@ class UserChatHistory(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, primary_key=True)
     messages = models.JSONField(default=list)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class WordComment(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    word = models.ForeignKey(Word, on_delete=models.CASCADE, related_name="comments")
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)

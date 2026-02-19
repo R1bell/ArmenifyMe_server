@@ -23,6 +23,8 @@ from ArmenifyMe.armenify_server.models import (
     UserChatHistory,
     UserSettings,
     UserWordProgress,
+    Word,
+    WordComment,
 )
 from ArmenifyMe.armenify_server.serializers import (
     ChatAnswerRequestSerializer,
@@ -38,6 +40,9 @@ from ArmenifyMe.armenify_server.serializers import (
     RegisterResponseSerializer,
     RefreshResponseSerializer,
     UserSettingsSerializer,
+    WordCommentCreateSerializer,
+    WordCommentResponseSerializer,
+    WordListSerializer,
     WordProgressListSerializer,
     WordProgressSerializer,
 )
@@ -359,6 +364,17 @@ class LearningRefillView(APIView):
         return Response(data)
 
 
+class WordListView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        responses=WordListSerializer(many=True),
+    )
+    def get(self, request):
+        words = Word.objects.order_by("created_at")
+        return Response(WordListSerializer(words, many=True).data)
+
+
 class LearningDeleteView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -549,3 +565,29 @@ class SettingsView(APIView):
         ensure_learning_list(request.user.id)
         _invalidate_lists(request.user.id)
         return Response(serializer.data)
+
+
+class WordCommentCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        request=WordCommentCreateSerializer,
+        responses=WordCommentResponseSerializer,
+    )
+    def post(self, request, word_id):
+        serializer = WordCommentCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        word = Word.objects.filter(id=word_id).first()
+        if not word:
+            return Response({"detail": "word not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        comment = WordComment.objects.create(
+            user=request.user,
+            word=word,
+            text=serializer.validated_data["text"],
+        )
+        return Response(
+            WordCommentResponseSerializer(comment).data,
+            status=status.HTTP_201_CREATED,
+        )
