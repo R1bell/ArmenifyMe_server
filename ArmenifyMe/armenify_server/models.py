@@ -56,6 +56,7 @@ class UserWordProgress(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     word = models.ForeignKey(Word, on_delete=models.CASCADE)
     status = models.CharField(max_length=16, choices=Status.choices)
+    manual_override = models.BooleanField(default=False)
     correct_count = models.IntegerField(default=0)
     progress_version = models.PositiveIntegerField(default=0)
     last_asked_at = models.DateTimeField(null=True, blank=True)
@@ -105,6 +106,12 @@ class ChatAnswerIdempotency(models.Model):
                 name="uq_chat_answer_idempotency_user_client_message",
             ),
         ]
+
+
+class UserChatHistory(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, primary_key=True)
+    messages = models.JSONField(default=list)
+    updated_at = models.DateTimeField(auto_now=True)
 
 
 class WordComment(models.Model):

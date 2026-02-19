@@ -24,10 +24,13 @@ urlpatterns = [
     path("api/v1/auth/login", views.LoginView.as_view()),
     path("api/v1/auth/refresh", views.RefreshView.as_view()),
     path("api/v1/auth/logout", views.LogoutView.as_view()),
-    path("api/v1/chat/question", views.ChatQuestionView.as_view()),
+    # NOTE FOR REVIEWERS: the next prompt is selected on the client for optimistic UI.
+    # Backend remains the source of truth via POST /chat/answer sync.
     path("api/v1/chat/answer", views.ChatAnswerView.as_view()),
+    path("api/v1/chat/history", views.ChatHistoryView.as_view()),
     path("api/v1/words", views.WordListView.as_view()),
     path("api/v1/words/learning", views.LearningListView.as_view()),
+    path("api/v1/words/learning/refill", views.LearningRefillView.as_view()),
     path("api/v1/words/learning/<uuid:word_id>/delete", views.LearningDeleteView.as_view()),
     path("api/v1/words/learning/<uuid:word_id>/move", views.LearningMoveView.as_view()),
     path("api/v1/words/learned", views.LearnedListView.as_view()),
@@ -39,4 +42,3 @@ urlpatterns = [
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api-auth/", include("rest_framework.urls", namespace="rest_framework")),
 ]
-
