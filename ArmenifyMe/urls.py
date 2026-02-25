@@ -38,6 +38,7 @@ urlpatterns = [
     path("api/v1/words/learned/<uuid:word_id>/delete", views.LearnedDeleteView.as_view()),
     path("api/v1/words/<uuid:word_id>/comment", views.WordCommentCreateView.as_view()),
     path("api/v1/settings", views.SettingsView.as_view()),
+    path("api/v1/progress/reset", views.ProgressResetView.as_view()),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
     path("api-auth/", include("rest_framework.urls", namespace="rest_framework")),
