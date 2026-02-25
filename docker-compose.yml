@@ -39,6 +39,7 @@ services:
       rabbitmq:
         condition: service_started
     environment:
+      DEBUG: ${DEBUG:-false}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-postgres}
@@ -68,6 +69,7 @@ services:
       rabbitmq:
         condition: service_started
     environment:
+      DEBUG: ${DEBUG:-false}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-postgres}
@@ -77,10 +79,19 @@ services:
       CORRECT_THRESHOLD: ${CORRECT_THRESHOLD:-10}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-amqp://guest:guest@rabbitmq:5672//}
       CELERY_RESULT_BACKEND: ${CELERY_RESULT_BACKEND:-redis://redis:6379/0}
+      CELERY_RESULT_EXPIRES: ${CELERY_RESULT_EXPIRES:-3600}
+      CELERY_WORKER_PREFETCH_MULTIPLIER: ${CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      CELERY_WORKER_CONCURRENCY: ${CELERY_WORKER_CONCURRENCY:-2}
+      CELERY_WORKER_MAX_TASKS_PER_CHILD: ${CELERY_WORKER_MAX_TASKS_PER_CHILD:-200}
+      CELERY_WORKER_MAX_MEMORY_PER_CHILD: ${CELERY_WORKER_MAX_MEMORY_PER_CHILD:-262144}
       REDIS_CACHE_URL: redis://redis:6379/1
       CACHE_TTL: ${CACHE_TTL:-60}
     command: >
-      sh -c "celery -A ArmenifyMe worker -l info"
+      sh -c "celery -A ArmenifyMe worker -l info
+             --concurrency=$${CELERY_WORKER_CONCURRENCY}
+             --prefetch-multiplier=$${CELERY_WORKER_PREFETCH_MULTIPLIER}
+             --max-tasks-per-child=$${CELERY_WORKER_MAX_TASKS_PER_CHILD}
+             --max-memory-per-child=$${CELERY_WORKER_MAX_MEMORY_PER_CHILD}"
 
   analytics-db:
     image: postgres:16
@@ -102,6 +113,8 @@ services:
       - analytics-db
       - rabbitmq
     environment:
+      DEBUG: ${DEBUG:-false}
+      ANALYTICS_DEBUG: ${ANALYTICS_DEBUG:-false}
       ANALYTICS_DB_HOST: analytics-db
       ANALYTICS_DB_PORT: "5432"
       ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-analytics}
@@ -123,6 +136,8 @@ services:
       - analytics-db
       - rabbitmq
     environment:
+      DEBUG: ${DEBUG:-false}
+      ANALYTICS_DEBUG: ${ANALYTICS_DEBUG:-false}
       ANALYTICS_DB_HOST: analytics-db
       ANALYTICS_DB_PORT: "5432"
       ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-analytics}
@@ -130,8 +145,16 @@ services:
       ANALYTICS_DB_PASSWORD: ${ANALYTICS_DB_PASSWORD:-admin}
       ANALYTICS_SECRET_KEY: ${ANALYTICS_SECRET_KEY:-analytics-insecure-change-me}
       ANALYTICS_CELERY_BROKER_URL: ${ANALYTICS_CELERY_BROKER_URL:-amqp://guest:guest@rabbitmq:5672//}
+      ANALYTICS_CELERY_WORKER_PREFETCH_MULTIPLIER: ${ANALYTICS_CELERY_WORKER_PREFETCH_MULTIPLIER:-1}
+      ANALYTICS_CELERY_WORKER_CONCURRENCY: ${ANALYTICS_CELERY_WORKER_CONCURRENCY:-1}
+      ANALYTICS_CELERY_WORKER_MAX_TASKS_PER_CHILD: ${ANALYTICS_CELERY_WORKER_MAX_TASKS_PER_CHILD:-200}
+      ANALYTICS_CELERY_WORKER_MAX_MEMORY_PER_CHILD: ${ANALYTICS_CELERY_WORKER_MAX_MEMORY_PER_CHILD:-196608}
     command: >
-      sh -c "celery -A analytics_service worker -l info"
+      sh -c "celery -A analytics_service worker -l info
+             --concurrency=$${ANALYTICS_CELERY_WORKER_CONCURRENCY}
+             --prefetch-multiplier=$${ANALYTICS_CELERY_WORKER_PREFETCH_MULTIPLIER}
+             --max-tasks-per-child=$${ANALYTICS_CELERY_WORKER_MAX_TASKS_PER_CHILD}
+             --max-memory-per-child=$${ANALYTICS_CELERY_WORKER_MAX_MEMORY_PER_CHILD}"
 
 volumes:
   postgres_data:
