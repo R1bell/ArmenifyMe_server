@@ -19,6 +19,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
 from ArmenifyMe.armenify_server.models import (
+    ChatMessage,
     ChatAnswerIdempotency,
     UserChatHistory,
     UserSettings,
@@ -162,6 +163,17 @@ def _recalculate_statuses_sync(user, threshold: int) -> None:
     )
     if moved_to_learned or moved_to_learning:
         _invalidate_lists(user.id)
+
+
+def _reset_user_progress_sync(user) -> int:
+    ChatAnswerIdempotency.objects.filter(user=user).delete()
+    UserChatHistory.objects.filter(user=user).delete()
+    ChatMessage.objects.filter(user=user).delete()
+    UserWordProgress.objects.filter(user=user).delete()
+
+    created = ensure_learning_list(user.id)
+    _invalidate_lists(user.id)
+    return created
 
 
 class ChatAnswerView(APIView):
@@ -598,6 +610,29 @@ class SettingsView(APIView):
         ensure_learning_list(request.user.id)
         _invalidate_lists(request.user.id)
         return Response(serializer.data)
+
+
+class ProgressResetView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    @transaction.atomic
+    @extend_schema(
+        responses=None,
+        description="Reset user progress/history while preserving user settings and word comments.",
+    )
+    def post(self, request):
+        created = _reset_user_progress_sync(request.user)
+        learning_count = UserWordProgress.objects.filter(
+            user=request.user,
+            status=UserWordProgress.Status.LEARNING,
+        ).count()
+        return Response(
+            {
+                "status": "reset",
+                "learning_count": learning_count,
+                "created": created,
+            }
+        )
 
 
 class WordCommentCreateView(APIView):

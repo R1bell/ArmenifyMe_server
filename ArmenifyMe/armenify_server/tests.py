@@ -4,7 +4,15 @@ from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from ArmenifyMe.armenify_server.models import UserSettings, UserWordProgress, Word, WordComment
+from ArmenifyMe.armenify_server.models import (
+    ChatAnswerIdempotency,
+    ChatMessage,
+    UserChatHistory,
+    UserSettings,
+    UserWordProgress,
+    Word,
+    WordComment,
+)
 
 User = get_user_model()
 
@@ -180,6 +188,92 @@ class WordCommentTests(BaseAPITestCase):
         self.assertEqual(response.data["word_id"], str(self.word.id))
         self.assertEqual(response.data["text"], payload["text"])
         self.assertEqual(WordComment.objects.filter(user=self.user, word=self.word).count(), 1)
+
+
+class ProgressResetTests(BaseAPITestCase):
+    def setUp(self):
+        super().setUp()
+        self.user = User.objects.create_user(email="reset@example.com", password="secret123")
+        self.client.force_authenticate(self.user)
+        self.settings = UserSettings.objects.create(
+            user=self.user,
+            correct_threshold=7,
+            learning_list_size=2,
+        )
+        self.words = [
+            Word.objects.create(
+                armenian=f"word-{idx}",
+                translations=[f"tr-{idx}"],
+                transcription=f"t-{idx}",
+                level="A1",
+            )
+            for idx in range(4)
+        ]
+        UserWordProgress.objects.create(
+            user=self.user,
+            word=self.words[0],
+            status=UserWordProgress.Status.LEARNING,
+            correct_count=3,
+            progress_version=2,
+        )
+        UserWordProgress.objects.create(
+            user=self.user,
+            word=self.words[1],
+            status=UserWordProgress.Status.LEARNED,
+            correct_count=8,
+            manual_override=True,
+            progress_version=5,
+        )
+        UserWordProgress.objects.create(
+            user=self.user,
+            word=self.words[2],
+            status=UserWordProgress.Status.DELETED,
+            correct_count=1,
+            progress_version=1,
+        )
+        UserChatHistory.objects.create(
+            user=self.user,
+            messages=[{"id": "1", "role": "sender", "text": "test"}],
+        )
+        ChatAnswerIdempotency.objects.create(
+            user=self.user,
+            client_message_id="m1",
+            request_hash="a" * 64,
+            response_payload={"ok": True},
+        )
+        ChatMessage.objects.create(
+            user=self.user,
+            role=ChatMessage.Role.USER,
+            word=self.words[0],
+            content="legacy message",
+        )
+        WordComment.objects.create(user=self.user, word=self.words[0], text="note")
+
+    def test_reset_progress_restores_new_user_like_state_but_keeps_settings(self):
+        response = self.client.post("/api/v1/progress/reset", format="json")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["status"], "reset")
+        self.assertEqual(response.data["learning_count"], 2)
+
+        self.settings.refresh_from_db()
+        self.assertEqual(self.settings.correct_threshold, 7)
+        self.assertEqual(self.settings.learning_list_size, 2)
+
+        progress_qs = UserWordProgress.objects.filter(user=self.user)
+        self.assertEqual(progress_qs.count(), 2)
+        self.assertEqual(
+            progress_qs.filter(status=UserWordProgress.Status.LEARNING).count(),
+            2,
+        )
+        self.assertFalse(progress_qs.exclude(correct_count=0).exists())
+        self.assertFalse(progress_qs.filter(manual_override=True).exists())
+        self.assertFalse(progress_qs.exclude(progress_version=0).exists())
+
+        self.assertFalse(UserChatHistory.objects.filter(user=self.user).exists())
+        self.assertFalse(ChatAnswerIdempotency.objects.filter(user=self.user).exists())
+        self.assertFalse(ChatMessage.objects.filter(user=self.user).exists())
+        self.assertTrue(WordComment.objects.filter(user=self.user).exists())
 
 
 class WordListTests(BaseAPITestCase):
