@@ -39,6 +39,7 @@ services:
       rabbitmq:
         condition: service_started
     environment:
+      DEBUG: ${DEBUG:-false}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-postgres}
@@ -68,7 +69,7 @@ services:
       rabbitmq:
         condition: service_started
     environment:
-      DEBUG: "false"
+      DEBUG: ${DEBUG:-false}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-postgres}
@@ -112,6 +113,8 @@ services:
       - analytics-db
       - rabbitmq
     environment:
+      DEBUG: ${DEBUG:-false}
+      ANALYTICS_DEBUG: ${ANALYTICS_DEBUG:-false}
       ANALYTICS_DB_HOST: analytics-db
       ANALYTICS_DB_PORT: "5432"
       ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-analytics}
@@ -133,8 +136,8 @@ services:
       - analytics-db
       - rabbitmq
     environment:
-      DEBUG: "false"
-      ANALYTICS_DEBUG: "false"
+      DEBUG: ${DEBUG:-false}
+      ANALYTICS_DEBUG: ${ANALYTICS_DEBUG:-false}
       ANALYTICS_DB_HOST: analytics-db
       ANALYTICS_DB_PORT: "5432"
       ANALYTICS_DB_NAME: ${ANALYTICS_DB_NAME:-analytics}
