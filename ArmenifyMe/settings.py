@@ -227,6 +227,9 @@ CELERY_TASK_ROUTES = {
     "analytics.create_user": {
         "queue": os.getenv("CELERY_ANALYTICS_QUEUE", "analytics"),
     },
+    "analytics.store_user_answer": {
+        "queue": os.getenv("CELERY_ANALYTICS_QUEUE", "analytics"),
+    },
 }
 
 SIMPLE_JWT = {

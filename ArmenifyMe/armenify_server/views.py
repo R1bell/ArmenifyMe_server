@@ -48,6 +48,7 @@ from ArmenifyMe.armenify_server.serializers import (
     WordProgressSerializer,
 )
 from ArmenifyMe.armenify_server.tasks import add_initial_words, ensure_learning_list
+from ArmenifyMe.celery import app as celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +69,36 @@ def _enqueue_add_initial_words(user):
         add_initial_words.delay(user.id)
     except Exception as exc:
         logger.warning("failed to enqueue add_initial_words for user_id=%s: %s", user.id, exc)
+
+
+def _enqueue_create_analytics_user(user_id, email: str) -> None:
+    try:
+        celery_app.send_task(
+            "analytics.create_user",
+            args=[user_id, email, email],
+        )
+    except Exception as exc:
+        logger.warning(
+            "failed to enqueue analytics user creation for user_id=%s: %s",
+            user_id,
+            exc,
+        )
+
+
+def _enqueue_store_user_answer(
+    user_id,
+    word: str,
+    answer: str,
+    is_correct: bool,
+    timestamp: str,
+) -> None:
+    try:
+        celery_app.send_task(
+            "analytics.store_user_answer",
+            args=[user_id, word, answer, is_correct, timestamp],
+        )
+    except Exception as exc:
+        logger.warning("failed to enqueue analytics answer event for user_id=%s: %s", user_id, exc)
 
 def _cache_key(user_id: int, list_name: str) -> str:
     return f"lists:{list_name}:user:{user_id}"
@@ -293,6 +324,20 @@ class ChatAnswerView(APIView):
                     _invalidate_lists(request.user.id)
                     _ensure_learning_size(request.user)
 
+                transaction.on_commit(
+                    lambda user_id=request.user.id,
+                    word=progress.word.armenian,
+                    submitted_answer=answer,
+                    was_correct=correct,
+                    processed_timestamp=processed_at: _enqueue_store_user_answer(
+                        user_id=user_id,
+                        word=word,
+                        answer=submitted_answer,
+                        is_correct=was_correct,
+                        timestamp=processed_timestamp,
+                    )
+                )
+
                 serialized = ChatAnswerResponseSerializer(payload).data
                 return Response(serialized, status=status_code)
         finally:
@@ -318,6 +363,12 @@ class RegisterView(APIView):
         serializer = RegisterSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
+        transaction.on_commit(
+            lambda user_id=user.id, email=user.email: _enqueue_create_analytics_user(
+                user_id=user_id,
+                email=email,
+            )
+        )
         _enqueue_add_initial_words(user)
         return Response({"id": user.id, "email": user.email}, status=status.HTTP_201_CREATED)
 

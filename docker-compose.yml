@@ -40,6 +40,9 @@ services:
         condition: service_started
     environment:
       DEBUG: ${DEBUG:-false}
+      SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      CSRF_COOKIE_SECURE: ${CSRF_COOKIE_SECURE:-false}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-postgres}
@@ -70,6 +73,9 @@ services:
         condition: service_started
     environment:
       DEBUG: ${DEBUG:-false}
+      SECURE_SSL_REDIRECT: ${SECURE_SSL_REDIRECT:-false}
+      SESSION_COOKIE_SECURE: ${SESSION_COOKIE_SECURE:-false}
+      CSRF_COOKIE_SECURE: ${CSRF_COOKIE_SECURE:-false}
       DB_HOST: db
       DB_PORT: "5432"
       DB_NAME: ${DB_NAME:-postgres}
@@ -125,8 +131,8 @@ services:
     ports:
       - "8001:8001"
     command: >
-      sh -c "python manage.py migrate &&
-             python manage.py runserver 0.0.0.0:8001"
+      sh -c "alembic upgrade head &&
+             uvicorn analytics_service.main:app --host 0.0.0.0 --port 8001"
 
   analytics-worker:
     build:
@@ -150,7 +156,8 @@ services:
       ANALYTICS_CELERY_WORKER_MAX_TASKS_PER_CHILD: ${ANALYTICS_CELERY_WORKER_MAX_TASKS_PER_CHILD:-200}
       ANALYTICS_CELERY_WORKER_MAX_MEMORY_PER_CHILD: ${ANALYTICS_CELERY_WORKER_MAX_MEMORY_PER_CHILD:-196608}
     command: >
-      sh -c "celery -A analytics_service worker -l info
+      sh -c "alembic upgrade head &&
+             celery -A analytics_service.celery_app:celery_app worker -l info
              --concurrency=$${ANALYTICS_CELERY_WORKER_CONCURRENCY}
              --prefetch-multiplier=$${ANALYTICS_CELERY_WORKER_PREFETCH_MULTIPLIER}
              --max-tasks-per-child=$${ANALYTICS_CELERY_WORKER_MAX_TASKS_PER_CHILD}

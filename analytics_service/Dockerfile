@@ -21,4 +21,4 @@ COPY . /app
 
 EXPOSE 8001
 
-CMD ["sh", "-c", "python manage.py runserver 0.0.0.0:${PORT:-8001}"]
+CMD ["sh", "-c", "alembic upgrade head && uvicorn analytics_service.main:app --host 0.0.0.0 --port ${PORT:-8001}"]

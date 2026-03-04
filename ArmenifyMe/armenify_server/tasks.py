@@ -48,10 +48,6 @@ def add_initial_words(user_id: int) -> int:
         ]
     )
     _invalidate_lists(user.id)
-    celery_app.send_task(
-        "analytics.create_user",
-        args=[user.id, user.email, user.email],
-    )
     return len(created)
 
 
